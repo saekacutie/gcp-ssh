@@ -537,4 +537,138 @@ show_output() {
     echo -e "${BG_GREEN}${WHITE}${BOLD}                                                     ${RESET}"
     echo ""
     echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo -e "${CYAN}$
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo ""
+    echo -e "  ${WHITE}Service:${RESET}      ${BOLD}$SERVICE_NAME${RESET}"
+    echo -e "  ${WHITE}Server IP:${RESET}    ${GREEN}${BOLD}$PUBLIC_IP${RESET}"
+    echo -e "  ${WHITE}Location:${RESET}     $CITY, $COUNTRY"
+    echo -e "  ${WHITE}Zone:${RESET}         $ZONE"
+    echo ""
+    echo -e "  ${WHITE}SSH Port:${RESET}     ${GREEN}${BOLD}$SSH_PORT${RESET}"
+    echo -e "  ${WHITE}TLS Port:${RESET}     ${GREEN}${BOLD}$TLS_PORT${RESET}"
+    echo -e "  ${WHITE}Username:${RESET}     ${BOLD}$SSH_USER${RESET}"
+    echo -e "  ${WHITE}Password:${RESET}     ${BOLD}$SSH_PASS${RESET}"
+    echo -e "  ${WHITE}Root Pass:${RESET}    ${BOLD}$ROOT_PASS${RESET}"
+    echo ""
+    if [ -n "$TARGET_IPS" ]; then
+        echo -e "  ${WHITE}Target Domain:${RESET} ${MAGENTA}$TARGET_DOMAIN${RESET}"
+        echo -e "  ${WHITE}Target IPs:${RESET}"
+        while IFS= read -r ip; do
+            [ -n "$ip" ] && echo -e "    ${DIM}-> $ip${RESET}"
+        done <<< "$TARGET_IPS"
+    fi
+    echo ""
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo -e "${CYAN}${BOLD}  | CONNECTION COMMANDS                        |${RESET}"
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo ""
+    echo -e "  ${GREEN}[Direct SSH]${RESET}"
+    echo -e "  ${WHITE}ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT${RESET}"
+    echo ""
+    echo -e "  ${GREEN}[SSH + TLS (Stunnel)]${RESET}"
+    echo -e "  ${WHITE}ssh $SSH_USER@$PUBLIC_IP -p $TLS_PORT${RESET}"
+    echo ""
+    echo -e "  ${GREEN}[SOCKS5 Tunnel]${RESET}"
+    echo -e "  ${WHITE}ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
+    echo ""
+    echo -e "  ${GREEN}[Dynamic Port Forward]${RESET}"
+    echo -e "  ${WHITE}ssh -D 8080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
+    echo ""
+    if [ -n "$TARGET_IPS" ]; then
+        echo -e "  ${GREEN}[Proxy to Target Server]${RESET}"
+        FIRST_IP=$(echo "$TARGET_IPS" | head -1)
+        echo -e "  ${WHITE}ssh -L 80:${FIRST_IP}:80 -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
+        echo -e "  ${WHITE}ssh -L 443:${FIRST_IP}:443 -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
+    fi
+    echo ""
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo -e "${CYAN}${BOLD}  | VPN APP CONFIGURATION                      |${RESET}"
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo ""
+    echo -e "  ${MAGENTA}[HTTP Custom / HTTP Injector]${RESET}"
+    echo -e "  Server:     $PUBLIC_IP"
+    echo -e "  Port:       $SSH_PORT"
+    echo -e "  User:       $SSH_USER"
+    echo -e "  Password:   $SSH_PASS"
+    echo ""
+    echo -e "  ${MAGENTA}[Nekobox / V2RayNG]${RESET}"
+    echo -e "  Type:       SSH"
+    echo -e "  Address:    $PUBLIC_IP"
+    echo -e "  Port:       $SSH_PORT"
+    echo -e "  User:       $SSH_USER"
+    echo -e "  Password:   $SSH_PASS"
+    echo ""
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo -e "${CYAN}${BOLD}  | MANAGEMENT                                  |${RESET}"
+    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}[Stop Server]${RESET}"
+    echo -e "  ${WHITE}gcloud compute instances stop $SERVICE_NAME --zone=$ZONE${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}[Start Server]${RESET}"
+    echo -e "  ${WHITE}gcloud compute instances start $SERVICE_NAME --zone=$ZONE${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}[Check Status]${RESET}"
+    echo -e "  ${WHITE}gcloud compute instances describe $SERVICE_NAME --zone=$ZONE${RESET}"
+    echo ""
+    echo -e "  ${RED}${BOLD}[DELETE SERVER - No Charges]${RESET}"
+    echo -e "  ${RED}gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --quiet${RESET}"
+    echo -e "  ${RED}gcloud compute firewall-rules delete $FIREWALL_SSH --quiet${RESET}"
+    echo -e "  ${RED}gcloud compute firewall-rules delete $FIREWALL_TLS --quiet${RESET}"
+    echo ""
+    
+    # Save credentials
+    CRED_FILE="$HOME/vpn-ssh-${SERVICE_NAME}.txt"
+    cat > "$CRED_FILE" << CREDEOF
+============================================
+VPN SSH + TLS SERVER CREDENTIALS
+============================================
+Service:      $SERVICE_NAME
+Server IP:    $PUBLIC_IP
+SSH Port:     $SSH_PORT
+TLS Port:     $TLS_PORT
+Username:     $SSH_USER
+Password:     $SSH_PASS
+Root Pass:    $ROOT_PASS
+Target Domain: $TARGET_DOMAIN
+Target IPs:   $TARGET_IPS
+Zone:         $ZONE
+Location:     $CITY, $COUNTRY
+============================================
+Direct SSH:
+ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT
+SSH + TLS:
+ssh $SSH_USER@$PUBLIC_IP -p $TLS_PORT
+SOCKS5 Tunnel:
+ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP
+Delete:
+gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --quiet
+gcloud compute firewall-rules delete $FIREWALL_SSH --quiet
+gcloud compute firewall-rules delete $FIREWALL_TLS --quiet
+============================================
+CREDEOF
+    
+    echo -e "  ${GREEN}[OK] Credentials saved: $CRED_FILE${RESET}"
+    echo ""
+    echo -e "${BG_BLUE}${WHITE}${BOLD}  $PUBLIC_IP:$SSH_PORT | $SSH_USER | TLS:$TLS_PORT | Target:${TARGET_DOMAIN:-none}  ${RESET}"
+    echo ""
+}
+
+# ============================================
+# MAIN
+# ============================================
+main() {
+    show_banner
+    get_config
+    check_prereqs
+    resolve_target
+    enable_apis
+    create_firewall
+    TMP_DIR=$(build_startup)
+    deploy_vm "$TMP_DIR"
+    wait_ready
+    show_output
+}
+
+# RUN
+main
