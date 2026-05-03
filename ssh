@@ -1,15 +1,12 @@
 #!/bin/bash
 # ============================================
-# VPN SSH + TLS PROXY SERVER DEPLOYMENT v5.0
-# GCP Cloud Shell | No Qwiklabs | Direct Deploy
-# Target Server Routing | ASCII Icons | Typing Animation
+# VPN SSH + TLS PROXY SERVER v10.0
+# REAL TARGET SERVER FORWARDING
+# Customizable Target Credentials
+# SSH MOTD: SSH GCP SERVER BY SAEKA TOJIRP
 # ============================================
-
 clear
 
-# ============================================
-# COLOR DEFINITIONS
-# ============================================
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -22,314 +19,182 @@ DIM='\033[2m'
 RESET='\033[0m'
 BG_RED='\033[41m'
 BG_GREEN='\033[42m'
+BG_YELLOW='\033[43m'
 BG_BLUE='\033[44m'
 
 # ============================================
-# TYPING ANIMATION
+# GCP SERVER CREDENTIALS
 # ============================================
-type_text() {
-    local text="$1"
-    local delay="${2:-0.005}"
-    for ((i=0; i<${#text}; i++)); do
-        printf "%s" "${text:$i:1}"
-        sleep "$delay"
-    done
-    echo ""
-}
-
-type_slow() {
-    local text="$1"
-    for ((i=0; i<${#text}; i++)); do
-        printf "%s" "${text:$i:1}"
-        sleep 0.02
-    done
-    echo ""
-}
+SERVICE_NAME="vpn-ssh-server"
+SSH_USER="tunnelvpn"
+SSH_PASS="Tunnel@2025"
+ROOT_PASS="Root@2025"
+SSH_PORT="22"
+TLS_PORT="443"
+ZONE="us-central1-a"
+MACHINE_TYPE="e2-micro"
 
 # ============================================
-# SPINNER
+# TARGET SERVER CREDENTIALS
 # ============================================
-spinner() {
-    local pid=$1
-    local text="$2"
-    local frames='|/-\'
-    local i=0
-    while kill -0 $pid 2>/dev/null; do
-        i=$(( (i+1) %4 ))
-        printf "\r  [%s] %s" "${frames:$i:1}" "$text"
-        sleep 0.15
-    done
-    printf "\r  [OK] %s %s[DONE]%s\n" "$text" "${GREEN}" "${RESET}"
-}
+TARGET_HOST=""
+TARGET_PORT="22"
+TARGET_USER=""
+TARGET_PASS=""
 
-# ============================================
-# ERROR HANDLING
-# ============================================
-set -e
-trap 'echo -e "\n${BG_RED}${WHITE} [FATAL] Script failed at line $LINENO ${RESET}"; exit 1' ERR
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --name) SERVICE_NAME="$2"; shift 2 ;;
+        --user) SSH_USER="$2"; shift 2 ;;
+        --pass) SSH_PASS="$2"; shift 2 ;;
+        --root) ROOT_PASS="$2"; shift 2 ;;
+        --ssh-port) SSH_PORT="$2"; shift 2 ;;
+        --tls-port) TLS_PORT="$2"; shift 2 ;;
+        --target-host) TARGET_HOST="$2"; shift 2 ;;
+        --target-port) TARGET_PORT="$2"; shift 2 ;;
+        --target-user) TARGET_USER="$2"; shift 2 ;;
+        --target-pass) TARGET_PASS="$2"; shift 2 ;;
+        --zone) ZONE="$2"; shift 2 ;;
+        --machine) MACHINE_TYPE="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
 
-error_exit() {
-    echo -e "\n${BG_RED}${WHITE} [FATAL] $1 ${RESET}"
-    exit 1
-}
+FIREWALL_SSH="allow-${SERVICE_NAME}-ssh-${SSH_PORT}"
+FIREWALL_TLS="allow-${SERVICE_NAME}-tls-${TLS_PORT}"
 
 success() { echo -e "  ${GREEN}[OK]${RESET} $1"; }
 info()    { echo -e "  ${CYAN}[*]${RESET} $1"; }
 warn()    { echo -e "  ${YELLOW}[!]${RESET} $1"; }
-section() { echo -e "\n${BOLD}${WHITE}[$1]${RESET} ${CYAN}$2${RESET}"; }
 
 # ============================================
 # BANNER
 # ============================================
-show_banner() {
-    clear
-    echo -e "${CYAN}${BOLD}"
-    echo "  +--------------------------------------------------+"
-    echo "  |                                                  |"
-    echo "  |   ${WHITE}__   __${CYAN}_____  ${WHITE}_   _${CYAN} _____ ${WHITE}_   _${CYAN} _     ${CYAN}  |"
-    echo "  |   ${WHITE}\ \ / /${CYAN}  __ \ ${WHITE}| \ |${CYAN}/ ____${WHITE}| \ |${CYAN}| |    ${CYAN}  |"
-    echo "  |   ${WHITE} \ V /${CYAN}| |__) |${WHITE}|  \|${CYAN}| |__ ${WHITE}|  \|${CYAN}| |    ${CYAN}  |"
-    echo "  |   ${WHITE}  > < ${CYAN}|  ___/ ${WHITE}| . \`${CYAN}|  __|${WHITE}| . \`${CYAN}| |    ${CYAN}  |"
-    echo "  |   ${WHITE} / . \\\\${CYAN}| |   ${WHITE}_| |\  ${CYAN}| |___${WHITE}| |\  ${CYAN}| |____${CYAN}  |"
-    echo "  |   ${WHITE}/_/ \_\\${CYAN}\_|  ${WHITE}(_)_| \_${CYAN}\_____${WHITE}|_| \_${CYAN}|______| ${CYAN}  |"
-    echo "  |                                                  |"
-    echo "  |   ${WHITE}SSH + TLS PROXY SERVER DEPLOYMENT${CYAN}             |"
-    echo "  |   ${DIM}Target Server Routing | No Qwiklabs${CYAN}             |"
-    echo "  +--------------------------------------------------+"
-    echo -e "${RESET}"
-}
+echo -e "${CYAN}${BOLD}"
+echo "  +--------------------------------------------------+"
+echo "  |                                                  |"
+echo "  |   ${WHITE}__   __${CYAN}_____  ${WHITE}_   _${CYAN} _____ ${WHITE}_   _${CYAN} _     ${CYAN}  |"
+echo "  |   ${WHITE}\ \ / /${CYAN}  __ \ ${WHITE}| \ |${CYAN}/ ____${WHITE}| \ |${CYAN}| |    ${CYAN}  |"
+echo "  |   ${WHITE} \ V /${CYAN}| |__) |${WHITE}|  \|${CYAN}| |__ ${WHITE}|  \|${CYAN}| |    ${CYAN}  |"
+echo "  |   ${WHITE}  > < ${CYAN}|  ___/ ${WHITE}| . \`${CYAN}|  __|${WHITE}| . \`${CYAN}| |    ${CYAN}  |"
+echo "  |   ${WHITE} / . \\${CYAN}| |   ${WHITE}_| |\  ${CYAN}| |___${WHITE}| |\  ${CYAN}| |____${CYAN}  |"
+echo "  |   ${WHITE}/_/ \_\\${CYAN}\_|  ${WHITE}(_)_| \_${CYAN}\_____${WHITE}|_| \_${CYAN}|______| ${CYAN}  |"
+echo "  |                                                  |"
+echo "  |   ${WHITE}SSH + TLS PROXY WITH TARGET FORWARDING${CYAN}         |"
+echo "  |   ${YELLOW}SSH GCP SERVER BY SAEKA TOJIRP${CYAN}                |"
+echo "  +--------------------------------------------------+"
+echo -e "${RESET}"
 
 # ============================================
-# CONFIGURATION INPUT
+# DISPLAY CONFIG
 # ============================================
-get_config() {
+echo ""
+echo -e "${YELLOW}${BOLD}  GCP SERVER CONFIGURATION${RESET}"
+echo -e "  ${CYAN}Service:${RESET}     ${WHITE}$SERVICE_NAME${RESET}"
+echo -e "  ${CYAN}SSH User:${RESET}     ${WHITE}$SSH_USER${RESET}"
+echo -e "  ${CYAN}SSH Pass:${RESET}     ${WHITE}$SSH_PASS${RESET}"
+echo -e "  ${CYAN}SSH Port:${RESET}     ${WHITE}$SSH_PORT${RESET}"
+echo -e "  ${CYAN}TLS Port:${RESET}     ${WHITE}$TLS_PORT${RESET}"
+echo ""
+
+if [ -n "$TARGET_HOST" ]; then
+    echo -e "${MAGENTA}${BOLD}  TARGET SERVER CONFIGURATION${RESET}"
+    echo -e "  ${MAGENTA}Host:${RESET}     ${WHITE}$TARGET_HOST${RESET}"
+    echo -e "  ${MAGENTA}Port:${RESET}     ${WHITE}$TARGET_PORT${RESET}"
+    echo -e "  ${MAGENTA}User:${RESET}     ${WHITE}$TARGET_USER${RESET}"
+    echo -e "  ${MAGENTA}Pass:${RESET}     ${WHITE}$TARGET_PASS${RESET}"
     echo ""
-    echo -e "${YELLOW}${BOLD}  =============================================${RESET}"
-    echo -e "${YELLOW}${BOLD}  | CONFIGURE VPN SSH + TLS PROXY SERVER      |${RESET}"
-    echo -e "${YELLOW}${BOLD}  =============================================${RESET}"
-    echo ""
-    
-    type_text "  Enter configuration values (or press Enter for defaults):" 0.01
-    
-    echo ""
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}Service Name${RESET} ${DIM}[vpn-ssh-server]${RESET}: "
-    read SERVICE_NAME
-    SERVICE_NAME=${SERVICE_NAME:-vpn-ssh-server}
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}SSH Username${RESET} ${DIM}[tunnelvpn]${RESET}: "
-    read SSH_USER
-    SSH_USER=${SSH_USER:-tunnelvpn}
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}SSH Password${RESET} ${DIM}[auto-generate]${RESET}: "
-    read -s SSH_PASS
-    echo ""
-    if [ -z "$SSH_PASS" ]; then
-        SSH_PASS=$(openssl rand -base64 18 | tr -d "=+/" | cut -c1-20)
-        type_text "  ${GREEN}[*] Generated password: ${WHITE}${BOLD}$SSH_PASS${RESET}" 0.005
-    fi
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}Root Password${RESET} ${DIM}[auto-generate]${RESET}: "
-    read -s ROOT_PASS
-    echo ""
-    if [ -z "$ROOT_PASS" ]; then
-        ROOT_PASS=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-        type_text "  ${GREEN}[*] Generated root password: ${WHITE}${BOLD}$ROOT_PASS${RESET}" 0.005
-    fi
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}SSH Port${RESET} ${DIM}[22]${RESET}: "
-    read SSH_PORT
-    SSH_PORT=${SSH_PORT:-22}
-    # Validate port
-    if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [ "$SSH_PORT" -lt 1 ] || [ "$SSH_PORT" -gt 65535 ]; then
-        warn "Invalid port. Using default 22."
-        SSH_PORT=22
-    fi
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}TLS/SSL Port${RESET} ${DIM}[443]${RESET}: "
-    read TLS_PORT
-    TLS_PORT=${TLS_PORT:-443}
-    if ! [[ "$TLS_PORT" =~ ^[0-9]+$ ]] || [ "$TLS_PORT" -lt 1 ] || [ "$TLS_PORT" -gt 65535 ]; then
-        warn "Invalid port. Using default 443."
-        TLS_PORT=443
-    fi
-    
-    echo ""
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}Target Server Domain${RESET} ${DIM}(e.g., example.panel.site.com)${RESET}: "
-    read TARGET_DOMAIN
-    
-    if [ -z "$TARGET_DOMAIN" ]; then
-        warn "No target server provided. SSH will work without proxy routing."
-        TARGET_DOMAIN=""
-    fi
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}Zone${RESET} ${DIM}[us-central1-a]${RESET}: "
-    read ZONE
-    ZONE=${ZONE:-us-central1-a}
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}Machine Type${RESET} ${DIM}[e2-micro]${RESET}: "
-    read MACHINE_TYPE
-    MACHINE_TYPE=${MACHINE_TYPE:-e2-micro}
-    
-    echo ""
-    echo -e "${YELLOW}${BOLD}  =============================================${RESET}"
-    echo -e "${YELLOW}${BOLD}  | CONFIGURATION SUMMARY                     |${RESET}"
-    echo -e "${YELLOW}${BOLD}  =============================================${RESET}"
-    echo -e "  ${CYAN}Service:${RESET}     ${WHITE}$SERVICE_NAME${RESET}"
-    echo -e "  ${CYAN}SSH User:${RESET}     ${WHITE}$SSH_USER${RESET}"
-    echo -e "  ${CYAN}SSH Port:${RESET}     ${WHITE}$SSH_PORT${RESET}"
-    echo -e "  ${CYAN}TLS Port:${RESET}     ${WHITE}$TLS_PORT${RESET}"
-    echo -e "  ${CYAN}Target:${RESET}       ${WHITE}${TARGET_DOMAIN:-NONE}${RESET}"
-    echo -e "  ${CYAN}Zone:${RESET}         ${WHITE}$ZONE${RESET}"
-    echo -e "  ${CYAN}Machine:${RESET}      ${WHITE}$MACHINE_TYPE${RESET}"
-    echo -e "${YELLOW}${BOLD}  =============================================${RESET}"
-    echo ""
-    
-    echo -ne "  ${CYAN}[?]${RESET} ${WHITE}Proceed with deployment? (Y/n): ${RESET}"
-    read CONFIRM
-    if [ "$CONFIRM" = "n" ] || [ "$CONFIRM" = "N" ]; then
-        echo -e "\n  ${RED}[X] Deployment cancelled.${RESET}"
-        exit 0
-    fi
-}
+fi
+
+echo -e "${CYAN}${BOLD}  DEPLOYING...${RESET}"
+echo ""
 
 # ============================================
 # CHECK PREREQUISITES
 # ============================================
-check_prereqs() {
-    section "1/8" "CHECKING PREREQUISITES"
-    
-    if ! command -v gcloud &> /dev/null; then
-        error_exit "gcloud CLI not found. Are you in Cloud Shell?"
-    fi
-    success "gcloud CLI verified"
-    
-    ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || echo "")
-    if [ -z "$ACCOUNT" ]; then
-        error_exit "Not authenticated. Run: gcloud auth login"
-    fi
-    success "Authenticated: $ACCOUNT"
-    
-    PROJECT_ID=$(gcloud config get-value project 2>/dev/null || echo "")
-    if [ -z "$PROJECT_ID" ]; then
-        PROJECT_ID=$(gcloud projects list --format='value(projectId)' --limit=1 2>/dev/null || echo "")
-        if [ -z "$PROJECT_ID" ]; then
-            error_exit "No project found. Create one at console.cloud.google.com"
-        fi
-        gcloud config set project "$PROJECT_ID" 2>/dev/null
-    fi
-    success "Project: $PROJECT_ID"
-}
+if ! command -v gcloud &> /dev/null; then
+    echo -e "${BG_RED}${WHITE} [FATAL] gcloud CLI not found. Run in Cloud Shell. ${RESET}"
+    exit 1
+fi
 
-# ============================================
-# RESOLVE TARGET SERVER IPs
-# ============================================
-resolve_target() {
-    section "2/8" "RESOLVING TARGET SERVER"
-    
-    if [ -z "$TARGET_DOMAIN" ]; then
-        warn "No target domain provided. Skipping IP resolution."
-        TARGET_IPS=""
-        return
+ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || echo "")
+if [ -z "$ACCOUNT" ]; then
+    echo -e "${BG_RED}${WHITE} [FATAL] Not authenticated. Run: gcloud auth login ${RESET}"
+    exit 1
+fi
+
+PROJECT_ID=$(gcloud config get-value project 2>/dev/null || echo "")
+if [ -z "$PROJECT_ID" ]; then
+    PROJECT_ID=$(gcloud projects list --format='value(projectId)' --limit=1 2>/dev/null || echo "")
+    if [ -z "$PROJECT_ID" ]; then
+        echo -e "${BG_RED}${WHITE} [FATAL] No project found. ${RESET}"
+        exit 1
     fi
-    
-    type_text "  [*] Resolving $TARGET_DOMAIN ..." 0.01
-    
-    # Resolve IPs
-    TARGET_IPS=$(dig +short "$TARGET_DOMAIN" A 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u || echo "")
-    
-    if [ -z "$TARGET_IPS" ]; then
-        # Fallback to host command
-        TARGET_IPS=$(host "$TARGET_DOMAIN" 2>/dev/null | grep "has address" | awk '{print $NF}' | sort -u || echo "")
-    fi
-    
-    if [ -z "$TARGET_IPS" ]; then
-        warn "Could not resolve $TARGET_DOMAIN. Using domain as-is."
-        TARGET_IPS="$TARGET_DOMAIN"
-        TARGET_COUNT=1
-    else
-        TARGET_COUNT=$(echo "$TARGET_IPS" | wc -l)
-        success "Resolved $TARGET_COUNT IP(s) from $TARGET_DOMAIN"
-        echo ""
-        echo -e "  ${CYAN}  Resolved IPs:${RESET}"
-        while IFS= read -r ip; do
-            echo -e "  ${WHITE}    -> $ip${RESET}"
-        done <<< "$TARGET_IPS"
-    fi
-    echo ""
-}
+    gcloud config set project "$PROJECT_ID" 2>/dev/null
+fi
+success "Project: $PROJECT_ID"
+success "Account: $ACCOUNT"
 
 # ============================================
 # ENABLE APIS
 # ============================================
-enable_apis() {
-    section "3/8" "ENABLING APIS"
-    gcloud services enable compute.googleapis.com --quiet 2>/dev/null &
-    spinner $! "Enabling Compute Engine API..."
-}
+gcloud services enable compute.googleapis.com --quiet 2>/dev/null
+success "Compute API enabled"
+
+# ============================================
+# RESOLVE TARGET HOST
+# ============================================
+TARGET_IP=""
+if [ -n "$TARGET_HOST" ]; then
+    info "Resolving target host: $TARGET_HOST"
+    TARGET_IP=$(dig +short "$TARGET_HOST" A 2>/dev/null | head -1 || echo "")
+    if [ -z "$TARGET_IP" ]; then
+        TARGET_IP=$(host "$TARGET_HOST" 2>/dev/null | grep "has address" | awk '{print $NF}' | head -1 || echo "")
+    fi
+    if [ -n "$TARGET_IP" ]; then
+        success "Target resolved: $TARGET_HOST -> $TARGET_IP"
+    else
+        warn "Could not resolve $TARGET_HOST. Using hostname directly."
+        TARGET_IP="$TARGET_HOST"
+    fi
+fi
 
 # ============================================
 # CREATE FIREWALL
 # ============================================
-create_firewall() {
-    section "4/8" "CONFIGURING FIREWALL"
-    
-    FIREWALL_SSH="allow-${SERVICE_NAME}-ssh-${SSH_PORT}"
-    FIREWALL_TLS="allow-${SERVICE_NAME}-tls-${TLS_PORT}"
-    
-    gcloud compute firewall-rules delete "$FIREWALL_SSH" --quiet 2>/dev/null || true
-    gcloud compute firewall-rules delete "$FIREWALL_TLS" --quiet 2>/dev/null || true
-    
-    gcloud compute firewall-rules create "$FIREWALL_SSH" \
-        --allow tcp:${SSH_PORT} \
-        --direction=INGRESS \
-        --priority=1000 \
-        --quiet 2>/dev/null &
-    spinner $! "Creating SSH firewall rule (port $SSH_PORT)..."
-    
-    gcloud compute firewall-rules create "$FIREWALL_TLS" \
-        --allow tcp:${TLS_PORT} \
-        --direction=INGRESS \
-        --priority=1000 \
-        --quiet 2>/dev/null &
-    spinner $! "Creating TLS firewall rule (port $TLS_PORT)..."
-}
+gcloud compute firewall-rules delete "$FIREWALL_SSH" --quiet 2>/dev/null || true
+gcloud compute firewall-rules delete "$FIREWALL_TLS" --quiet 2>/dev/null || true
+
+gcloud compute firewall-rules create "$FIREWALL_SSH" --allow tcp:${SSH_PORT} --direction=INGRESS --priority=1000 --quiet 2>/dev/null
+success "SSH firewall created (port $SSH_PORT)"
+
+gcloud compute firewall-rules create "$FIREWALL_TLS" --allow tcp:${TLS_PORT} --direction=INGRESS --priority=1000 --quiet 2>/dev/null
+success "TLS firewall created (port $TLS_PORT)"
 
 # ============================================
 # BUILD STARTUP SCRIPT
 # ============================================
-build_startup() {
-    section "5/8" "BUILDING DEPLOYMENT CONFIG"
-    
-    # Prepare target IPs list for Docker
-    TARGET_IPS_LIST=""
-    if [ -n "$TARGET_IPS" ]; then
-        TARGET_IPS_LIST=$(echo "$TARGET_IPS" | tr '\n' ',' | sed 's/,$//')
-    fi
-    
-    TMP_DIR=$(mktemp -d)
-    
-    cat > "$TMP_DIR/startup-script.sh" << 'STARTUPEOF'
+TMP_DIR=$(mktemp -d)
+
+cat > "$TMP_DIR/startup-script.sh" << 'STARTUPEOF'
 #!/bin/bash
 set -e
 
-# Read metadata
 SSH_USER=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SSH_USER" -H "Metadata-Flavor: Google" || echo "tunnelvpn")
 SSH_PASS=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SSH_PASS" -H "Metadata-Flavor: Google")
 SSH_PORT=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SSH_PORT" -H "Metadata-Flavor: Google" || echo "22")
 TLS_PORT=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TLS_PORT" -H "Metadata-Flavor: Google" || echo "443")
 ROOT_PASS=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/ROOT_PASS" -H "Metadata-Flavor: Google")
-TARGET_IPS=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TARGET_IPS" -H "Metadata-Flavor: Google" || echo "")
-TARGET_DOMAIN=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TARGET_DOMAIN" -H "Metadata-Flavor: Google" || echo "")
-SERVICE_NAME=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SERVICE_NAME" -H "Metadata-Flavor: Google" || echo "vpn-ssh-server")
+TARGET_HOST=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TARGET_HOST" -H "Metadata-Flavor: Google" || echo "")
+TARGET_PORT=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TARGET_PORT" -H "Metadata-Flavor: Google" || echo "22")
+TARGET_USER=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TARGET_USER" -H "Metadata-Flavor: Google" || echo "")
+TARGET_PASS=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/attributes/TARGET_PASS" -H "Metadata-Flavor: Google" || echo "")
 
 LOG="/var/log/vpn-setup.log"
-echo "[$(date)] Starting setup: $SERVICE_NAME" > "$LOG"
 
-# Update
 apt-get update -y >> "$LOG" 2>&1
 apt-get upgrade -y -qq >> "$LOG" 2>&1
 
-# Install Docker
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>> "$LOG"
     sh /tmp/get-docker.sh >> "$LOG" 2>&1
@@ -337,27 +202,24 @@ fi
 systemctl enable docker 2>/dev/null || true
 systemctl start docker 2>/dev/null || true
 
-# Remove old container
 docker rm -f ssh-server 2>/dev/null || true
 docker rm -f stunnel-server 2>/dev/null || true
 
-# Create Docker network
-docker network create vpn-net 2>/dev/null || true
-
-# Build SSH Dockerfile
+# SSH Container
 cat > /root/Dockerfile.ssh << 'DOCKEREOF'
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server sudo curl wget net-tools iputils-ping iptables \
     procps htop nano vim tmux screen socat netcat-openbsd dnsutils \
-    stunnel4 && apt-get clean && mkdir -p /var/run/sshd
+    stunnel4 sshpass && apt-get clean && mkdir -p /var/run/sshd
 RUN echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
     echo 'ClientAliveInterval 60' >> /etc/ssh/sshd_config && \
     echo 'ClientAliveCountMax 3' >> /etc/ssh/sshd_config && \
     echo 'TCPKeepAlive yes' >> /etc/ssh/sshd_config && \
     echo 'MaxSessions 100' >> /etc/ssh/sshd_config && \
+    echo 'MaxStartups 50:30:100' >> /etc/ssh/sshd_config && \
     echo 'AllowTcpForwarding yes' >> /etc/ssh/sshd_config && \
     echo 'GatewayPorts yes' >> /etc/ssh/sshd_config && \
     echo 'PermitTunnel yes' >> /etc/ssh/sshd_config
@@ -365,310 +227,264 @@ EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D", "-e"]
 DOCKEREOF
 
-# Build SSH image
 docker build -t ssh-image /root/ -f /root/Dockerfile.ssh >> "$LOG" 2>&1
 
-# Run SSH container
 docker run -d --name ssh-server --restart unless-stopped \
     --network host --cap-add=NET_ADMIN --cap-add=SYS_ADMIN --privileged \
     ssh-image >> "$LOG" 2>&1
 
-sleep 3
+sleep 4
 
-# Configure user
+# Configure users and SSH MOTD
 docker exec ssh-server bash -c "
     useradd -rm -d /home/$SSH_USER -s /bin/bash -G sudo,root $SSH_USER 2>/dev/null || true
     echo '$SSH_USER:$SSH_PASS' | chpasswd
     echo 'root:$ROOT_PASS' | chpasswd
     echo '$SSH_USER ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/$SSH_USER
-    sed -i 's/Port 22/Port $SSH_PORT/' /etc/ssh/sshd_config 2>/dev/null || echo 'Port $SSH_PORT' >> /etc/ssh/sshd_config
+    sed -i 's/#Port 22/Port $SSH_PORT/' /etc/ssh/sshd_config
+    echo 'Port $SSH_PORT' >> /etc/ssh/sshd_config
+
+    # YELLOW MOTD
+    cat > /etc/motd << 'MOTD'
+\033[1;33m
+  ╔══════════════════════════════════════════╗
+  ║  SSH GCP SERVER BY SAEKA TOJIRP         ║
+  ╚══════════════════════════════════════════╝
+\033[0m
+MOTD
+    echo 'PrintMotd yes' >> /etc/ssh/sshd_config
+    echo 'Banner /etc/motd' >> /etc/ssh/sshd_config
 " >> "$LOG" 2>&1
 
-# Restart SSH
 docker exec ssh-server service ssh restart >> "$LOG" 2>&1 || docker exec ssh-server kill -HUP 1 2>/dev/null
 
-# Configure Stunnel for TLS
-if [ -n "$TARGET_IPS" ]; then
-    # Create Stunnel config
-    cat > /root/stunnel.conf << STUNCONF
+# Stunnel TLS
+mkdir -p /etc/stunnel
+openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+    -subj "/C=US/ST=CA/L=City/O=VPN/CN=localhost" \
+    -keyout /etc/stunnel/stunnel.pem \
+    -out /etc/stunnel/stunnel.pem 2>> "$LOG"
+
+cat > /root/stunnel.conf << STUNEOF
 [ssh-tls]
 accept = 0.0.0.0:$TLS_PORT
 connect = 127.0.0.1:$SSH_PORT
 cert = /etc/stunnel/stunnel.pem
 TIMEOUTclose = 0
-STUNCONF
+STUNEOF
 
-    # Generate self-signed cert
-    mkdir -p /etc/stunnel
-    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
-        -subj "/C=US/ST=State/L=City/O=VPN/CN=$TARGET_DOMAIN" \
-        -keyout /etc/stunnel/stunnel.pem \
-        -out /etc/stunnel/stunnel.pem 2>> "$LOG"
-    
-    # Run Stunnel container
-    docker run -d --name stunnel-server --restart unless-stopped \
-        --network host \
-        -v /root/stunnel.conf:/etc/stunnel/stunnel.conf \
-        -v /etc/stunnel/stunnel.pem:/etc/stunnel/stunnel.pem \
-        ubuntu:22.04 bash -c "
-            apt-get update && apt-get install -y stunnel4 && \
-            stunnel /etc/stunnel/stunnel.conf
-            tail -f /dev/null
-        " >> "$LOG" 2>&1
+docker run -d --name stunnel-server --restart unless-stopped \
+    --network host \
+    -v /root/stunnel.conf:/etc/stunnel/stunnel.conf \
+    -v /etc/stunnel/stunnel.pem:/etc/stunnel/stunnel.pem \
+    ubuntu:22.04 bash -c "
+        apt-get update && apt-get install -y stunnel4 && \
+        stunnel /etc/stunnel/stunnel.conf
+        tail -f /dev/null
+    " >> "$LOG" 2>&1
+
+# Target server auto-connect script
+if [ -n "$TARGET_HOST" ] && [ -n "$TARGET_USER" ] && [ -n "$TARGET_PASS" ]; then
+    cat > /usr/local/bin/connect-target << TARGETEOF
+#!/bin/bash
+sshpass -p '$TARGET_PASS' ssh -o StrictHostKeyChecking=no -p $TARGET_PORT $TARGET_USER@$TARGET_HOST
+TARGETEOF
+    chmod +x /usr/local/bin/connect-target
+
+    # Also set up autossh for persistent connection
+    cat > /etc/systemd/system/target-tunnel.service << SVCEOF
+[Unit]
+Description=Target Server Tunnel
+After=network.target
+[Service]
+ExecStart=/usr/bin/sshpass -p '$TARGET_PASS' ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -N -L 0.0.0.0:8080:127.0.0.1:80 -L 0.0.0.0:8443:127.0.0.1:443 -p $TARGET_PORT $TARGET_USER@$TARGET_HOST
+Restart=always
+User=root
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    # Allow ports for target forwarding
+    iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 8443 -j ACCEPT
 fi
 
-# Create combined hosts file with target IPs
-if [ -n "$TARGET_IPS" ]; then
-    echo "$TARGET_IPS" | tr ',' '\n' > /etc/vpn-target-hosts.txt
-    echo "TARGET_HOSTS_FILE=/etc/vpn-target-hosts.txt" >> /etc/environment
-fi
-
-# Verify SSH
 sleep 2
 if docker exec ssh-server pgrep sshd > /dev/null 2>&1; then
     echo "SETUP_COMPLETE" > /var/log/vpn-setup-complete.log
-    echo "[$(date)] SUCCESS" >> "$LOG"
-else
-    echo "[$(date)] FAILED" >> "$LOG"
-    exit 1
 fi
 STARTUPEOF
 
-    chmod +x "$TMP_DIR/startup-script.sh"
-    success "Startup script built"
-    echo "$TMP_DIR"
-}
+chmod +x "$TMP_DIR/startup-script.sh"
+success "Startup script built"
 
 # ============================================
 # DEPLOY VM
 # ============================================
-deploy_vm() {
-    section "6/8" "DEPLOYING VIRTUAL MACHINE"
-    
-    TMP_DIR="$1"
-    
-    # Delete existing
-    if gcloud compute instances describe "$SERVICE_NAME" --zone="$ZONE" --quiet 2>/dev/null; then
-        warn "Existing VM found. Removing..."
-        gcloud compute instances delete "$SERVICE_NAME" --zone="$ZONE" --quiet 2>/dev/null
-        sleep 5
-    fi
-    
-    # Prepare target IPs for metadata
-    TARGET_IPS_META=""
-    if [ -n "$TARGET_IPS" ]; then
-        TARGET_IPS_META=$(echo "$TARGET_IPS" | tr '\n' ',' | sed 's/,$//')
-    fi
-    
-    # Create VM
-    gcloud compute instances create "$SERVICE_NAME" \
-        --image-family=ubuntu-2204-lts \
-        --image-project=ubuntu-os-cloud \
-        --machine-type="$MACHINE_TYPE" \
-        --zone="$ZONE" \
-        --tags="$FIREWALL_SSH,$FIREWALL_TLS" \
-        --metadata-from-file startup-script="$TMP_DIR/startup-script.sh" \
-        --metadata="SSH_USER=$SSH_USER,SSH_PASS=$SSH_PASS,SSH_PORT=$SSH_PORT,TLS_PORT=$TLS_PORT,ROOT_PASS=$ROOT_PASS,TARGET_IPS=$TARGET_IPS_META,TARGET_DOMAIN=$TARGET_DOMAIN,SERVICE_NAME=$SERVICE_NAME" \
-        --boot-disk-size=20GB \
-        --boot-disk-type=pd-standard \
-        --quiet 2>/dev/null &
-    spinner $! "Creating VM instance: $SERVICE_NAME..."
-    
-    rm -rf "$TMP_DIR"
-}
+if gcloud compute instances describe "$SERVICE_NAME" --zone="$ZONE" --quiet 2>/dev/null; then
+    warn "Removing existing VM: $SERVICE_NAME"
+    gcloud compute instances delete "$SERVICE_NAME" --zone="$ZONE" --quiet 2>/dev/null
+    sleep 5
+fi
+
+gcloud compute instances create "$SERVICE_NAME" \
+    --image-family=ubuntu-2204-lts \
+    --image-project=ubuntu-os-cloud \
+    --machine-type="$MACHINE_TYPE" \
+    --zone="$ZONE" \
+    --tags="$FIREWALL_SSH,$FIREWALL_TLS" \
+    --metadata-from-file startup-script="$TMP_DIR/startup-script.sh" \
+    --metadata="SSH_USER=$SSH_USER,SSH_PASS=$SSH_PASS,SSH_PORT=$SSH_PORT,TLS_PORT=$TLS_PORT,ROOT_PASS=$ROOT_PASS,TARGET_HOST=$TARGET_HOST,TARGET_PORT=$TARGET_PORT,TARGET_USER=$TARGET_USER,TARGET_PASS=$TARGET_PASS,SERVICE_NAME=$SERVICE_NAME" \
+    --boot-disk-size=20GB \
+    --boot-disk-type=pd-standard \
+    --quiet 2>/dev/null &
+PID=$!
+wait $PID
+success "VM created: $SERVICE_NAME"
+
+rm -rf "$TMP_DIR"
 
 # ============================================
-# WAIT FOR READY
+# GET PUBLIC IP
 # ============================================
-wait_ready() {
-    section "7/8" "WAITING FOR SERVER INITIALIZATION"
-    
-    sleep 15
-    
-    PUBLIC_IP=$(gcloud compute instances describe "$SERVICE_NAME" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || echo "")
-    
-    if [ -z "$PUBLIC_IP" ]; then
-        error_exit "Could not get public IP."
+sleep 20
+PUBLIC_IP=$(gcloud compute instances describe "$SERVICE_NAME" --zone="$ZONE" --format='get(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || echo "")
+if [ -z "$PUBLIC_IP" ]; then
+    echo -e "${BG_RED}${WHITE} [FATAL] Could not get public IP. ${RESET}"
+    exit 1
+fi
+success "Public IP: $PUBLIC_IP"
+
+# ============================================
+# WAIT FOR SSH
+# ============================================
+info "Waiting for SSH service..."
+MAX_WAIT=200
+WAITED=0
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if nc -zv -w 3 "$PUBLIC_IP" "$SSH_PORT" 2>/dev/null; then
+        break
     fi
-    
-    success "Public IP: $PUBLIC_IP"
-    
-    type_text "  [*] Waiting for SSH service to become live..." 0.01
-    
-    MAX_WAIT=180
-    WAITED=0
-    
-    while [ $WAITED -lt $MAX_WAIT ]; do
-        if nc -zv -w 3 "$PUBLIC_IP" "$SSH_PORT" 2>/dev/null; then
-            echo ""
-            success "SSH service is LIVE on port $SSH_PORT"
-            break
-        fi
-        sleep 10
-        WAITED=$((WAITED + 10))
-        printf "\r  [*] Waiting... %ss / %ss" "$WAITED" "$MAX_WAIT"
-    done
-    
-    if [ $WAITED -ge $MAX_WAIT ]; then
-        warn "Timeout waiting for SSH. Server may still be initializing."
-    fi
-    
-    echo ""
-    
-    # Verify setup
-    gcloud compute ssh "$SERVICE_NAME" --zone="$ZONE" --command="test -f /var/log/vpn-setup-complete.log" \
-        --quiet 2>/dev/null && success "Server setup verified" || warn "Setup verification incomplete"
-}
+    sleep 10
+    WAITED=$((WAITED + 10))
+    printf "\r  [*] Waiting... %ss / %ss" "$WAITED" "$MAX_WAIT"
+done
+echo ""
+
+if [ $WAITED -ge $MAX_WAIT ]; then
+    warn "Timeout. Server may still be starting."
+else
+    success "SSH service LIVE on port $SSH_PORT"
+fi
+
+# ============================================
+# LOCATION INFO
+# ============================================
+LOCATION=$(curl -s "http://ip-api.com/json/${PUBLIC_IP}" 2>/dev/null || echo "")
+COUNTRY=$(echo "$LOCATION" | grep -o '"country":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "N/A")
+CITY=$(echo "$LOCATION" | grep -o '"city":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "N/A")
+ISP=$(echo "$LOCATION" | grep -o '"isp":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "N/A")
 
 # ============================================
 # FINAL OUTPUT
 # ============================================
-show_output() {
-    section "8/8" "DEPLOYMENT COMPLETE"
-    
-    # Get location
-    LOCATION=$(curl -s "http://ip-api.com/json/${PUBLIC_IP}" 2>/dev/null || echo "")
-    COUNTRY=$(echo "$LOCATION" | grep -o '"country":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "N/A")
-    CITY=$(echo "$LOCATION" | grep -o '"city":"[^"]*"' | cut -d'"' -f4 2>/dev/null || echo "N/A")
-    
+echo ""
+echo -e "${BG_GREEN}${WHITE}${BOLD}                                                     ${RESET}"
+echo -e "${BG_GREEN}${WHITE}${BOLD}     VPN SSH + TLS SERVER DEPLOYED SUCCESSFULLY      ${RESET}"
+echo -e "${BG_GREEN}${WHITE}${BOLD}                                                     ${RESET}"
+echo ""
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo -e "${CYAN}${BOLD}  | GCP SERVER CONNECTION DETAILS              |${RESET}"
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo ""
+echo -e "  ${WHITE}Service:${RESET}      ${BOLD}$SERVICE_NAME${RESET}"
+echo -e "  ${WHITE}Server IP:${RESET}    ${GREEN}${BOLD}$PUBLIC_IP${RESET}"
+echo -e "  ${WHITE}Location:${RESET}     $CITY, $COUNTRY"
+echo -e "  ${WHITE}ISP:${RESET}          $ISP"
+echo -e "  ${WHITE}Zone:${RESET}         $ZONE"
+echo ""
+echo -e "  ${WHITE}SSH Port:${RESET}     ${GREEN}${BOLD}$SSH_PORT${RESET}"
+echo -e "  ${WHITE}TLS Port:${RESET}     ${GREEN}${BOLD}$TLS_PORT${RESET}"
+echo -e "  ${WHITE}Username:${RESET}     ${BOLD}$SSH_USER${RESET}"
+echo -e "  ${WHITE}Password:${RESET}     ${BOLD}$SSH_PASS${RESET}"
+echo -e "  ${WHITE}Root Pass:${RESET}    ${BOLD}$ROOT_PASS${RESET}"
+echo ""
+echo -e "  ${YELLOW}${BOLD}SSH MOTD: SSH GCP SERVER BY SAEKA TOJIRP${RESET}"
+echo ""
+
+if [ -n "$TARGET_HOST" ]; then
+    echo -e "${MAGENTA}${BOLD}  =============================================${RESET}"
+    echo -e "${MAGENTA}${BOLD}  | TARGET SERVER FORWARDING CONFIG            |${RESET}"
+    echo -e "${MAGENTA}${BOLD}  =============================================${RESET}"
     echo ""
-    echo -e "${BG_GREEN}${WHITE}${BOLD}                                                     ${RESET}"
-    echo -e "${BG_GREEN}${WHITE}${BOLD}     VPN SSH + TLS SERVER DEPLOYED SUCCESSFULLY      ${RESET}"
-    echo -e "${BG_GREEN}${WHITE}${BOLD}                                                     ${RESET}"
+    echo -e "  ${WHITE}Target Host:${RESET} ${MAGENTA}$TARGET_HOST${RESET}"
+    echo -e "  ${WHITE}Target Port:${RESET} ${MAGENTA}$TARGET_PORT${RESET}"
+    echo -e "  ${WHITE}Target User:${RESET} ${MAGENTA}$TARGET_USER${RESET}"
+    echo -e "  ${WHITE}Target Pass:${RESET} ${MAGENTA}$TARGET_PASS${RESET}"
     echo ""
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+    echo -e "  ${GREEN}[Connect to Target via GCP Server]${RESET}"
+    echo -e "  ${WHITE}ssh -t $SSH_USER@$PUBLIC_IP -p $SSH_PORT connect-target${RESET}"
     echo ""
-    echo -e "  ${WHITE}Service:${RESET}      ${BOLD}$SERVICE_NAME${RESET}"
-    echo -e "  ${WHITE}Server IP:${RESET}    ${GREEN}${BOLD}$PUBLIC_IP${RESET}"
-    echo -e "  ${WHITE}Location:${RESET}     $CITY, $COUNTRY"
-    echo -e "  ${WHITE}Zone:${RESET}         $ZONE"
-    echo ""
-    echo -e "  ${WHITE}SSH Port:${RESET}     ${GREEN}${BOLD}$SSH_PORT${RESET}"
-    echo -e "  ${WHITE}TLS Port:${RESET}     ${GREEN}${BOLD}$TLS_PORT${RESET}"
-    echo -e "  ${WHITE}Username:${RESET}     ${BOLD}$SSH_USER${RESET}"
-    echo -e "  ${WHITE}Password:${RESET}     ${BOLD}$SSH_PASS${RESET}"
-    echo -e "  ${WHITE}Root Pass:${RESET}    ${BOLD}$ROOT_PASS${RESET}"
-    echo ""
-    if [ -n "$TARGET_IPS" ]; then
-        echo -e "  ${WHITE}Target Domain:${RESET} ${MAGENTA}$TARGET_DOMAIN${RESET}"
-        echo -e "  ${WHITE}Target IPs:${RESET}"
-        while IFS= read -r ip; do
-            [ -n "$ip" ] && echo -e "    ${DIM}-> $ip${RESET}"
-        done <<< "$TARGET_IPS"
-    fi
-    echo ""
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo -e "${CYAN}${BOLD}  | CONNECTION COMMANDS                        |${RESET}"
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo ""
-    echo -e "  ${GREEN}[Direct SSH]${RESET}"
-    echo -e "  ${WHITE}ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT${RESET}"
-    echo ""
-    echo -e "  ${GREEN}[SSH + TLS (Stunnel)]${RESET}"
-    echo -e "  ${WHITE}ssh $SSH_USER@$PUBLIC_IP -p $TLS_PORT${RESET}"
-    echo ""
-    echo -e "  ${GREEN}[SOCKS5 Tunnel]${RESET}"
-    echo -e "  ${WHITE}ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
-    echo ""
-    echo -e "  ${GREEN}[Dynamic Port Forward]${RESET}"
-    echo -e "  ${WHITE}ssh -D 8080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
-    echo ""
-    if [ -n "$TARGET_IPS" ]; then
-        echo -e "  ${GREEN}[Proxy to Target Server]${RESET}"
-        FIRST_IP=$(echo "$TARGET_IPS" | head -1)
-        echo -e "  ${WHITE}ssh -L 80:${FIRST_IP}:80 -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
-        echo -e "  ${WHITE}ssh -L 443:${FIRST_IP}:443 -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
-    fi
-    echo ""
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo -e "${CYAN}${BOLD}  | VPN APP CONFIGURATION                      |${RESET}"
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo ""
-    echo -e "  ${MAGENTA}[HTTP Custom / HTTP Injector]${RESET}"
-    echo -e "  Server:     $PUBLIC_IP"
-    echo -e "  Port:       $SSH_PORT"
-    echo -e "  User:       $SSH_USER"
-    echo -e "  Password:   $SSH_PASS"
-    echo ""
-    echo -e "  ${MAGENTA}[Nekobox / V2RayNG]${RESET}"
-    echo -e "  Type:       SSH"
-    echo -e "  Address:    $PUBLIC_IP"
-    echo -e "  Port:       $SSH_PORT"
-    echo -e "  User:       $SSH_USER"
-    echo -e "  Password:   $SSH_PASS"
-    echo ""
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo -e "${CYAN}${BOLD}  | MANAGEMENT                                  |${RESET}"
-    echo -e "${CYAN}${BOLD}  =============================================${RESET}"
-    echo ""
-    echo -e "  ${YELLOW}[Stop Server]${RESET}"
-    echo -e "  ${WHITE}gcloud compute instances stop $SERVICE_NAME --zone=$ZONE${RESET}"
-    echo ""
-    echo -e "  ${YELLOW}[Start Server]${RESET}"
-    echo -e "  ${WHITE}gcloud compute instances start $SERVICE_NAME --zone=$ZONE${RESET}"
-    echo ""
-    echo -e "  ${YELLOW}[Check Status]${RESET}"
-    echo -e "  ${WHITE}gcloud compute instances describe $SERVICE_NAME --zone=$ZONE${RESET}"
-    echo ""
-    echo -e "  ${RED}${BOLD}[DELETE SERVER - No Charges]${RESET}"
-    echo -e "  ${RED}gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --quiet${RESET}"
-    echo -e "  ${RED}gcloud compute firewall-rules delete $FIREWALL_SSH --quiet${RESET}"
-    echo -e "  ${RED}gcloud compute firewall-rules delete $FIREWALL_TLS --quiet${RESET}"
-    echo ""
-    
-    # Save credentials
-    CRED_FILE="$HOME/vpn-ssh-${SERVICE_NAME}.txt"
-    cat > "$CRED_FILE" << CREDEOF
+fi
+
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo -e "${CYAN}${BOLD}  | CONNECTION COMMANDS                        |${RESET}"
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo ""
+echo -e "  ${GREEN}[Direct SSH]${RESET}"
+echo -e "  ${WHITE}ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT${RESET}"
+echo ""
+echo -e "  ${GREEN}[SSH over TLS]${RESET}"
+echo -e "  ${WHITE}ssh $SSH_USER@$PUBLIC_IP -p $TLS_PORT${RESET}"
+echo ""
+echo -e "  ${GREEN}[SOCKS5 Tunnel]${RESET}"
+echo -e "  ${WHITE}ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP${RESET}"
+echo ""
+echo -e "  ${GREEN}[SCP Transfer]${RESET}"
+echo -e "  ${WHITE}scp -P $SSH_PORT file.txt $SSH_USER@$PUBLIC_IP:~/ ${RESET}"
+echo ""
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo -e "${CYAN}${BOLD}  | VPN APP CONFIG (Injector/HTTP Custom)      |${RESET}"
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo ""
+echo -e "  Server:     $PUBLIC_IP"
+echo -e "  Port:       $SSH_PORT"
+echo -e "  User:       $SSH_USER"
+echo -e "  Password:   $SSH_PASS"
+echo ""
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo -e "${CYAN}${BOLD}  | MANAGEMENT                                  |${RESET}"
+echo -e "${CYAN}${BOLD}  =============================================${RESET}"
+echo ""
+echo -e "  ${YELLOW}[Stop]${RESET}   gcloud compute instances stop $SERVICE_NAME --zone=$ZONE"
+echo -e "  ${YELLOW}[Start]${RESET}  gcloud compute instances start $SERVICE_NAME --zone=$ZONE"
+echo -e "  ${RED}[Delete]${RESET} gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --quiet"
+echo -e "  ${RED}[FW Del]${RESET} gcloud compute firewall-rules delete $FIREWALL_SSH --quiet"
+echo -e "  ${RED}[FW Del]${RESET} gcloud compute firewall-rules delete $FIREWALL_TLS --quiet"
+echo ""
+
+# Save credentials
+CRED_FILE="$HOME/vpn-ssh-${SERVICE_NAME}.txt"
+cat > "$CRED_FILE" << CREDEOF
 ============================================
 VPN SSH + TLS SERVER CREDENTIALS
 ============================================
-Service:      $SERVICE_NAME
-Server IP:    $PUBLIC_IP
-SSH Port:     $SSH_PORT
-TLS Port:     $TLS_PORT
-Username:     $SSH_USER
-Password:     $SSH_PASS
-Root Pass:    $ROOT_PASS
-Target Domain: $TARGET_DOMAIN
-Target IPs:   $TARGET_IPS
-Zone:         $ZONE
-Location:     $CITY, $COUNTRY
+Service:        $SERVICE_NAME
+Server IP:      $PUBLIC_IP
+SSH Port:       $SSH_PORT
+TLS Port:       $TLS_PORT
+Username:       $SSH_USER
+Password:       $SSH_PASS
+Root Pass:      $ROOT_PASS
+Target Host:    $TARGET_HOST
+Target Port:    $TARGET_PORT
+Target User:    $TARGET_USER
+Target Pass:    $TARGET_PASS
+Zone:           $ZONE
+Location:       $CITY, $COUNTRY
+ISP:            $ISP
 ============================================
-Direct SSH:
-ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT
-SSH + TLS:
-ssh $SSH_USER@$PUBLIC_IP -p $TLS_PORT
-SOCKS5 Tunnel:
-ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP
-Delete:
-gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --quiet
-gcloud compute firewall-rules delete $FIREWALL_SSH --quiet
-gcloud compute firewall-rules delete $FIREWALL_TLS --quiet
-============================================
-CREDEOF
-    
-    echo -e "  ${GREEN}[OK] Credentials saved: $CRED_FILE${RESET}"
-    echo ""
-    echo -e "${BG_BLUE}${WHITE}${BOLD}  $PUBLIC_IP:$SSH_PORT | $SSH_USER | TLS:$TLS_PORT | Target:${TARGET_DOMAIN:-none}  ${RESET}"
-    echo ""
-}
-
-# ============================================
-# MAIN
-# ============================================
-main() {
-    show_banner
-    get_config
-    check_prereqs
-    resolve_target
-    enable_apis
-    create_firewall
-    TMP_DIR=$(build_startup)
-    deploy_vm "$TMP_DIR"
-    wait_ready
-    show_output
-}
-
-# RUN
-main
+Direct:  ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT
+TLS:     ssh $SSH_USER@$PUBLIC_IP -p $TLS_PORT
+SOCKS5:  ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP
+Delete:  gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --q
