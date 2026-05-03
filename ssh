@@ -1,0 +1,347 @@
+#!/bin/bash
+# ============================================
+# GOOGLE CLOUD VPN SSH SERVER DEPLOYMENT
+# All-in-One Cloud Shell Deployment Script
+# ============================================
+
+clear
+
+# ============================================
+# USER CONFIGURATION - EDIT THESE VALUES
+# ============================================
+# These are environment variables - change them as needed
+
+TARGET_SERVER=""           # Leave empty for auto-create new VM
+SSH_PORT="22"              # Customize SSH port (22, 2222, 443, 8080, etc)
+SSH_USER="tunnelvpn"       # Customize username
+SSH_PASS=""                # Leave empty for auto-generated strong password
+VM_NAME="vpn-ssh-server"   # VM instance name
+ZONE="us-central1-a"       # Change to your preferred zone
+MACHINE_TYPE="e2-micro"    # Free tier eligible machine type
+
+# ============================================
+# AUTO-CONFIGURATION
+# ============================================
+
+# Generate strong password if not provided
+if [ -z "$SSH_PASS" ]; then
+    SSH_PASS=$(openssl rand -base64 18 | tr -d "=+/" | cut -c1-20)
+    AUTO_PASS=true
+else
+    AUTO_PASS=false
+fi
+
+# Set project
+PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+if [ -z "$PROJECT_ID" ]; then
+    PROJECT_ID=$(gcloud projects list --format='value(projectId)' --limit=1)
+    gcloud config set project $PROJECT_ID
+fi
+
+FIREWALL_RULE="allow-custom-ssh-${SSH_PORT}"
+
+echo ""
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║     GOOGLE CLOUD VPN SSH SERVER DEPLOYMENT           ║"
+echo "║     Cloud Shell Edition                              ║"
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+echo "Configuration Summary:"
+echo "  Project:      $PROJECT_ID"
+echo "  VM Name:      $VM_NAME"
+echo "  Machine:      $MACHINE_TYPE"
+echo "  Zone:         $ZONE"
+echo "  SSH Port:     $SSH_PORT"
+echo "  SSH User:     $SSH_USER"
+if [ "$AUTO_PASS" = true ]; then
+    echo "  SSH Password: [AUTO-GENERATED]"
+else
+    echo "  SSH Password: $SSH_PASS"
+fi
+echo ""
+
+# ============================================
+# STEP 1: ENABLE REQUIRED APIS
+# ============================================
+echo "[1/5] Enabling required Google Cloud APIs..."
+gcloud services enable compute.googleapis.com --quiet 2>/dev/null
+echo "  [OK] Compute Engine API enabled"
+
+# ============================================
+# STEP 2: CREATE FIREWALL RULE
+# ============================================
+echo "[2/5] Configuring firewall rules..."
+# Delete existing rule if exists
+gcloud compute firewall-rules delete $FIREWALL_RULE --quiet 2>/dev/null
+
+gcloud compute firewall-rules create $FIREWALL_RULE \
+    --allow tcp:$SSH_PORT \
+    --description="Custom SSH port ${SSH_PORT} for VPN server" \
+    --direction=INGRESS \
+    --priority=1000 \
+    --quiet 2>/dev/null
+echo "  [OK] Firewall rule created for port $SSH_PORT"
+
+# ============================================
+# STEP 3: CREATE STARTUP SCRIPT
+# ============================================
+echo "[3/5] Preparing server configuration..."
+
+cat > startup-script.sh << 'STARTUPEOF'
+#!/bin/bash
+# VPN SSH Server Startup Script
+# Auto-configures Docker SSH with custom credentials
+
+SSH_USER=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SSH_USER" -H "Metadata-Flavor: Google")
+SSH_PASS=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SSH_PASS" -H "Metadata-Flavor: Google")
+SSH_PORT=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SSH_PORT" -H "Metadata-Flavor: Google")
+ROOT_PASS=$(curl -s "http://metadata.google.internal/computeMetadata/v1/instance/attributes/ROOT_PASS" -H "Metadata-Flavor: Google")
+
+# Update system
+apt-get update -y
+
+# Install Docker
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+fi
+
+systemctl enable docker
+systemctl start docker
+
+# Remove existing container
+docker rm -f ssh-server 2>/dev/null
+
+# Create Dockerfile
+cat > /root/Dockerfile << 'DOCKEREOF'
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install -y openssh-server sudo curl wget net-tools iputils-ping \
+    iptables procps htop nano vim tmux screen && \
+    mkdir -p /var/run/sshd && \
+    apt-get clean
+
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 60/' /etc/ssh/sshd_config && \
+    sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 3/' /etc/ssh/sshd_config && \
+    sed -i 's/#TCPKeepAlive yes/TCPKeepAlive yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#Port 22/Port 22/' /etc/ssh/sshd_config && \
+    sed -i 's/#MaxSessions 10/MaxSessions 100/' /etc/ssh/sshd_config && \
+    sed -i 's/#MaxStartups 10:30:100/MaxStartups 50:30:100/' /etc/ssh/sshd_config && \
+    sed -i 's/#AllowTcpForwarding yes/AllowTcpForwarding yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#GatewayPorts no/GatewayPorts yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitTunnel no/PermitTunnel yes/' /etc/ssh/sshd_config && \
+    echo 'AllowAgentForwarding yes' >> /etc/ssh/sshd_config && \
+    echo 'AllowStreamLocalForwarding yes' >> /etc/ssh/sshd_config
+
+EXPOSE 22
+
+CMD ["/usr/sbin/sshd", "-D"]
+DOCKEREOF
+
+# Build image
+docker build -t ssh-server-image /root/
+
+# Run container
+docker run -d \
+    --name ssh-server \
+    --restart unless-stopped \
+    --network host \
+    --cap-add=NET_ADMIN \
+    --cap-add=SYS_ADMIN \
+    ssh-server-image
+
+# Wait for container to be ready
+sleep 3
+
+# Create user inside container
+docker exec ssh-server bash -c "
+    useradd -rm -d /home/$SSH_USER -s /bin/bash -G sudo $SSH_USER && \
+    echo '$SSH_USER:$SSH_PASS' | chpasswd && \
+    echo 'root:$ROOT_PASS' | chpasswd && \
+    echo '$SSH_USER ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+"
+
+# Change SSH port inside container to match external port
+docker exec ssh-server bash -c "
+    sed -i 's/Port 22/Port $SSH_PORT/' /etc/ssh/sshd_config
+"
+
+# Restart SSH inside container
+docker exec ssh-server bash -c "kill -HUP \$(cat /var/run/sshd.pid)" 2>/dev/null
+docker exec ssh-server service ssh restart 2>/dev/null
+
+echo "SERVER_READY" > /var/log/vpn-setup-complete.log
+STARTUPEOF
+
+chmod +x startup-script.sh
+echo "  [OK] Startup script prepared"
+
+# ============================================
+# STEP 4: DEPLOY VIRTUAL MACHINE
+# ============================================
+echo "[4/5] Deploying virtual machine..."
+
+# Generate root password
+ROOT_PASS=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
+
+# Delete existing VM if it exists
+gcloud compute instances delete $VM_NAME --zone=$ZONE --quiet 2>/dev/null
+
+# Create VM with metadata
+gcloud compute instances create $VM_NAME \
+    --image-family=ubuntu-2204-lts \
+    --image-project=ubuntu-os-cloud \
+    --machine-type=$MACHINE_TYPE \
+    --zone=$ZONE \
+    --tags=$FIREWALL_RULE \
+    --metadata-from-file startup-script=startup-script.sh \
+    --metadata="SSH_USER=$SSH_USER,SSH_PASS=$SSH_PASS,SSH_PORT=$SSH_PORT,ROOT_PASS=$ROOT_PASS" \
+    --boot-disk-size=20GB \
+    --boot-disk-type=pd-standard \
+    --quiet 2>/dev/null
+
+echo "  [OK] VM instance created"
+
+# ============================================
+# STEP 5: GET PUBLIC IP AND WAIT FOR READY
+# ============================================
+echo "[5/5] Obtaining server IP and verifying setup..."
+
+# Get public IP
+PUBLIC_IP=$(gcloud compute instances describe $VM_NAME --zone=$ZONE --format='get(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null)
+
+# Wait for SSH to be ready
+echo "  Waiting for server to initialize..."
+for i in $(seq 1 30); do
+    sleep 10
+    if gcloud compute ssh $VM_NAME --zone=$ZONE --command="test -f /var/log/vpn-setup-complete.log" --quiet 2>/dev/null; then
+        echo "  [OK] Server initialization complete"
+        break
+    fi
+    echo "  Waiting... (${i}0 seconds)"
+done
+
+# Get external network info
+curl -s "http://ip-api.com/json/${PUBLIC_IP}" > /tmp/ip_info.json 2>/dev/null
+COUNTRY=$(cat /tmp/ip_info.json 2>/dev/null | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
+CITY=$(cat /tmp/ip_info.json 2>/dev/null | grep -o '"city":"[^"]*"' | cut -d'"' -f4)
+ISP=$(cat /tmp/ip_info.json 2>/dev/null | grep -o '"isp":"[^"]*"' | cut -d'"' -f4)
+
+# Cleanup
+rm -f startup-script.sh 2>/dev/null
+
+# ============================================
+# FINAL OUTPUT
+# ============================================
+echo ""
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║                                                            ║"
+echo "║         VPN SSH SERVER DEPLOYMENT SUCCESSFUL               ║"
+echo "║                                                            ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+echo "═══════════════════════════════════════════"
+echo "  SERVER CONNECTION DETAILS"
+echo "═══════════════════════════════════════════"
+echo ""
+echo "  Server IP:    $PUBLIC_IP"
+echo "  SSH Port:     $SSH_PORT"
+echo "  Username:     $SSH_USER"
+echo "  Password:     $SSH_PASS"
+echo "  Root Pass:    $ROOT_PASS"
+echo ""
+if [ ! -z "$COUNTRY" ]; then
+echo "  Location:     $CITY, $COUNTRY"
+echo "  ISP:          $ISP"
+fi
+echo ""
+echo "═══════════════════════════════════════════"
+echo "  CONNECTION COMMANDS"
+echo "═══════════════════════════════════════════"
+echo ""
+echo "  Direct SSH:"
+echo "    ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT"
+echo ""
+echo "  SSH SOCKS5 Tunnel (VPN):"
+echo "    ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP"
+echo ""
+echo "  SSH with verbose debug:"
+echo "    ssh -v $SSH_USER@$PUBLIC_IP -p $SSH_PORT"
+echo ""
+echo "  Copy file to server:"
+echo "    scp -P $SSH_PORT file.txt $SSH_USER@$PUBLIC_IP:/home/$SSH_USER/"
+echo ""
+echo "  Copy file from server:"
+echo "    scp -P $SSH_PORT $SSH_USER@$PUBLIC_IP:/path/to/file ./"
+echo ""
+echo "═══════════════════════════════════════════"
+echo "  SERVER MANAGEMENT"
+echo "═══════════════════════════════════════════"
+echo ""
+echo "  Check server status:"
+echo "    gcloud compute instances describe $VM_NAME --zone=$ZONE"
+echo ""
+echo "  SSH from Cloud Shell:"
+echo "    gcloud compute ssh $VM_NAME --zone=$ZONE"
+echo ""
+echo "  Stop server:"
+echo "    gcloud compute instances stop $VM_NAME --zone=$ZONE"
+echo ""
+echo "  Start server:"
+echo "    gcloud compute instances start $VM_NAME --zone=$ZONE"
+echo ""
+echo "  DELETE server (no charges):"
+echo "    gcloud compute instances delete $VM_NAME --zone=$ZONE --quiet"
+echo "    gcloud compute firewall-rules delete $FIREWALL_RULE --quiet"
+echo ""
+echo "═══════════════════════════════════════════"
+echo "  HTTP CUSTOM / INJECTOR CONFIG"
+echo "═══════════════════════════════════════════"
+echo ""
+echo "  Server:   $PUBLIC_IP"
+echo "  Port:     $SSH_PORT"
+echo "  User:     $SSH_USER"
+echo "  Password: $SSH_PASS"
+echo ""
+echo "═══════════════════════════════════════════"
+echo ""
+echo "  [NOTE] This is a production-grade server."
+echo "  It will persist until you delete it."
+echo "  Remember to delete when done to avoid charges."
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  Server: $PUBLIC_IP:$SSH_PORT | User: $SSH_USER  ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+
+# Save credentials to file for reference
+cat > ~/vpn-ssh-credentials.txt << CREDEOF
+VPN SSH SERVER CREDENTIALS
+===========================
+Server IP:    $PUBLIC_IP
+SSH Port:     $SSH_PORT
+Username:     $SSH_USER
+Password:     $SSH_PASS
+Root Pass:    $ROOT_PASS
+VM Name:      $VM_NAME
+Zone:         $ZONE
+Project:      $PROJECT_ID
+
+Connection:
+ssh $SSH_USER@$PUBLIC_IP -p $SSH_PORT
+
+SOCKS5 Tunnel:
+ssh -D 1080 -N -p $SSH_PORT $SSH_USER@$PUBLIC_IP
+
+Delete Commands:
+gcloud compute instances delete $VM_NAME --zone=$ZONE --quiet
+gcloud compute firewall-rules delete $FIREWALL_RULE --quiet
+CREDEOF
+
+echo ""
+echo "Credentials saved to: ~/vpn-ssh-credentials.txt"
+echo ""
