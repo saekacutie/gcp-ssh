@@ -574,4 +574,34 @@ echo -e "  ${MAGENTA}SNI:${RESET}   smart.com.ph (or any host)"
 echo -e "  ${MAGENTA}Port:${RESET}  443"
 echo ""
 
-echo -e "${CYAN}${BOLD}  ╔═══════════════════════════════════════════════
+echo -e "${CYAN}${BOLD}  ╔══════════════════════════════════════════════════════════╗${RESET}"
+echo -e "${CYAN}${BOLD}  ║  MANAGEMENT                                              ║${RESET}"
+echo -e "${CYAN}${BOLD}  ╚══════════════════════════════════════════════════════════╝${RESET}"
+echo ""
+echo -e "  ${YELLOW}[Stop]${RESET}   gcloud compute instances stop $SERVICE_NAME --zone=$ZONE"
+echo -e "  ${YELLOW}[Start]${RESET}  gcloud compute instances start $SERVICE_NAME --zone=$ZONE"
+echo -e "  ${RED}[Delete]${RESET} gcloud compute instances delete $SERVICE_NAME --zone=$ZONE --quiet"
+echo ""
+
+# Save credentials
+CRED_FILE="$HOME/universal-proxy-${SERVICE_NAME}.txt"
+cat > "$CRED_FILE" << CREDEOF
+============================================
+UNIVERSAL SNI PROXY SERVER
+============================================
+Server IP:    $PUBLIC_IP
+SSH User:     $SSH_USER
+SSH Pass:     $SSH_PASS
+Root Pass:    $ROOT_PASS
+Ports:        80, 443, 22, 8080, 3128, 8443, 8888
+============================================
+Direct:  curl --resolve HOST:443:$PUBLIC_IP https://HOST/
+SSH:     ssh $SSH_USER@$PUBLIC_IP -p 22
+Squid:   curl -x http://$PUBLIC_IP:3128 https://HOST/
+============================================
+CREDEOF
+
+echo -e "  ${GREEN}[OK] Credentials saved: $CRED_FILE${RESET}"
+echo ""
+echo -e "${BG_BLUE}${WHITE}${BOLD}  $PUBLIC_IP | Ports: 80,443,22,8080,3128,8443,8888 | SSH: $SSH_USER  ${RESET}"
+echo ""
