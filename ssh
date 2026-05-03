@@ -26,9 +26,9 @@ BG_BLUE='\033[44m'
 # GCP SERVER CREDENTIALS
 # ============================================
 SERVICE_NAME="vpn-ssh-server"
-SSH_USER="tunnelvpn"
-SSH_PASS="Tunnel@2025"
-ROOT_PASS="Root@2025"
+SSH_USER="ssh-gcp"
+SSH_PASS="saeka"
+ROOT_PASS="saeka"
 SSH_PORT="22"
 TLS_PORT="443"
 ZONE="us-central1-a"
